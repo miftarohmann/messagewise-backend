@@ -1,0 +1,401 @@
+// =============================================================================
+// MessageWise Optimizer - Database Schema
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// User & Authentication
+// =============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String
+  plan          Plan      @default(FREE)
+  planExpiresAt DateTime?
+
+  // Telegram integration
+  telegramId    String?   @unique
+  telegramUsername String?
+
+  // Preferences
+  timezone      String    @default("Asia/Jakarta")
+  currency      Currency  @default(USD)
+  language      String    @default("en")
+
+  // Notification settings
+  emailNotifications    Boolean @default(true)
+  telegramNotifications Boolean @default(true)
+  dailySummary         Boolean @default(true)
+  costAlertThreshold   Float   @default(20) // Percentage increase trigger
+
+  // Metadata
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  accounts      Account[]
+  apiKeys       ApiKey[]
+  invoices      Invoice[]
+  sessions      Session[]
+
+  @@index([email])
+  @@index([telegramId])
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+enum Currency {
+  USD
+  IDR
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  token        String   @unique
+  refreshToken String   @unique
+  userAgent    String?
+  ipAddress    String?
+
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+}
+
+model ApiKey {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  key           String    @unique
+  keyHash       String    // Hashed version for lookup
+  name          String
+  permissions   String[]  @default(["read"])
+
+  lastUsedAt    DateTime?
+  expiresAt     DateTime?
+  isActive      Boolean   @default(true)
+
+  createdAt     DateTime  @default(now())
+
+  @@index([userId])
+  @@index([keyHash])
+}
+
+// =============================================================================
+// WhatsApp Accounts
+// =============================================================================
+
+model Account {
+  id                String    @id @default(cuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // WhatsApp Business API credentials
+  waBusinessId      String    @unique
+  waPhoneNumberId   String
+  waAccessToken     String    // Encrypted
+  waPhoneNumber     String
+  accountName       String
+
+  // Webhook configuration
+  webhookSecret     String?
+  webhookUrl        String?
+
+  // Account status
+  isActive          Boolean   @default(true)
+  isVerified        Boolean   @default(false)
+  lastSyncAt        DateTime?
+  syncStatus        SyncStatus @default(PENDING)
+
+  // Cost tracking
+  monthlyBudget     Float?
+  alertThreshold    Float     @default(80) // Percentage of budget
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  messages          Message[]
+  analyses          CostAnalysis[]
+  alerts            Alert[]
+
+  @@index([userId])
+  @@index([waBusinessId])
+}
+
+enum SyncStatus {
+  PENDING
+  SYNCING
+  COMPLETED
+  FAILED
+}
+
+// =============================================================================
+// Messages
+// =============================================================================
+
+model Message {
+  id                String          @id @default(cuid())
+  accountId         String
+  account           Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  // WhatsApp message details
+  waMessageId       String          @unique
+  direction         Direction
+  type              MessageType
+  category          MessageCategory
+  status            MessageStatus
+  timestamp         DateTime
+
+  // Conversation tracking
+  conversationId    String?
+  conversationExpiresAt DateTime?
+  isInFreeWindow    Boolean         @default(false)
+
+  // Cost information
+  cost              Float           @default(0)
+  estimatedCost     Float           @default(0)
+  currency          Currency        @default(USD)
+
+  // Classification metadata
+  classificationConfidence Float    @default(0)
+  classificationReason     String?
+  manuallyClassified      Boolean   @default(false)
+
+  // Message content (for classification, not stored long-term)
+  templateName      String?
+  templateCategory  String?
+  contentHash       String?         // Hash for deduplication
+
+  // Metadata
+  metadata          Json?
+  createdAt         DateTime        @default(now())
+
+  @@index([accountId, timestamp])
+  @@index([accountId, category])
+  @@index([conversationId])
+  @@index([category])
+  @@index([timestamp])
+}
+
+enum Direction {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  DOCUMENT
+  AUDIO
+  STICKER
+  LOCATION
+  CONTACTS
+  TEMPLATE
+  INTERACTIVE
+  REACTION
+  UNKNOWN
+}
+
+enum MessageCategory {
+  MARKETING
+  UTILITY
+  AUTHENTICATION
+  SERVICE
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+// =============================================================================
+// Cost Analysis
+// =============================================================================
+
+model CostAnalysis {
+  id                String    @id @default(cuid())
+  accountId         String
+  account           Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  // Analysis period
+  periodStart       DateTime
+  periodEnd         DateTime
+  periodType        PeriodType @default(DAILY)
+
+  // Message counts
+  totalMessages     Int
+  inboundMessages   Int       @default(0)
+  outboundMessages  Int       @default(0)
+  freeMessages      Int       @default(0)
+  paidMessages      Int       @default(0)
+
+  // Cost metrics
+  totalCost         Float
+  estimatedCost     Float     @default(0)
+  potentialSavings  Float     @default(0)
+  actualSavings     Float     @default(0)
+
+  // Breakdown by category
+  breakdown         Json      // { marketing: { count, cost }, utility: {...}, ... }
+
+  // Optimization metrics
+  optimizationScore Int       @default(0) // 0-100
+  recommendations   Json      // Array of recommendation objects
+
+  // Comparison metrics
+  costChange        Float?    // vs previous period
+  messageChange     Float?    // vs previous period
+
+  createdAt         DateTime  @default(now())
+
+  @@unique([accountId, periodStart, periodType])
+  @@index([accountId, periodStart])
+  @@index([periodType])
+}
+
+enum PeriodType {
+  HOURLY
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+// =============================================================================
+// Alerts
+// =============================================================================
+
+model Alert {
+  id            String      @id @default(cuid())
+  accountId     String
+  account       Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  type          AlertType
+  severity      Severity
+  title         String
+  message       String
+
+  // Alert data
+  data          Json?
+
+  // Status
+  isRead        Boolean     @default(false)
+  isDismissed   Boolean     @default(false)
+
+  // Notification status
+  emailSent     Boolean     @default(false)
+  telegramSent  Boolean     @default(false)
+  sentAt        DateTime?
+
+  createdAt     DateTime    @default(now())
+
+  @@index([accountId, createdAt])
+  @@index([type])
+}
+
+enum AlertType {
+  COST_SPIKE
+  BUDGET_WARNING
+  BUDGET_EXCEEDED
+  OPTIMIZATION_TIP
+  SYNC_FAILED
+  ACCOUNT_ISSUE
+}
+
+enum Severity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+// =============================================================================
+// Billing & Invoices
+// =============================================================================
+
+model Invoice {
+  id              String        @id @default(cuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Invoice details
+  invoiceNumber   String        @unique
+  amount          Float
+  currency        Currency      @default(USD)
+  status          InvoiceStatus @default(PENDING)
+
+  // Payment gateway
+  gateway         PaymentGateway
+  gatewayId       String?       // Stripe/Xendit invoice ID
+  gatewayData     Json?
+
+  // Plan details
+  plan            Plan
+  periodStart     DateTime
+  periodEnd       DateTime
+
+  // Dates
+  dueDate         DateTime
+  paidAt          DateTime?
+  createdAt       DateTime      @default(now())
+
+  @@index([userId])
+  @@index([status])
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentGateway {
+  STRIPE
+  XENDIT
+}
+
+// =============================================================================
+// Audit Log
+// =============================================================================
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  action      String
+  resource    String
+  resourceId  String?
+  details     Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
