@@ -95,7 +95,7 @@ function getFeaturesByPlan(plan: Plan): string[] {
     default:
       return [];
   }
-});
+}
 
 // =============================================================================
 // Stripe Endpoints (International)
@@ -117,7 +117,7 @@ router.post(
         res.status(400).json({
           success: false,
           error: {
-            code: ERROR_CODES.VALIDATION_INVALID_VALUE,
+            code: ERROR_CODES.VALIDATION_FAILED,
             message: 'Please select a paid plan',
           },
         });
@@ -129,7 +129,7 @@ router.post(
         res.status(400).json({
           success: false,
           error: {
-            code: ERROR_CODES.VALIDATION_INVALID_VALUE,
+            code: ERROR_CODES.VALIDATION_FAILED,
             message: 'Invalid plan selected',
           },
         });
@@ -268,7 +268,7 @@ router.post(
         res.status(400).json({
           success: false,
           error: {
-            code: ERROR_CODES.VALIDATION_INVALID_VALUE,
+            code: ERROR_CODES.VALIDATION_FAILED,
             message: 'Please select a paid plan',
           },
         });
@@ -463,7 +463,7 @@ router.post(
         res.status(400).json({
           success: false,
           error: {
-            code: ERROR_CODES.VALIDATION_INVALID_VALUE,
+            code: ERROR_CODES.VALIDATION_FAILED,
             message: 'Already on free plan',
           },
         });
